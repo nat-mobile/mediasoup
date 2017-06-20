@@ -35,6 +35,8 @@ public:
 		std::string rtcAnnouncedIPv6;
 		uint16_t rtcMinPort{ 10000 };
 		uint16_t rtcMaxPort{ 59999 };
+        uint16_t vp9MinSpartial{ 0 };
+        uint16_t vp9MinTemporial{ 0 };
 		std::string dtlsCertificateFile;
 		std::string dtlsPrivateKeyFile;
 		// Private fields.

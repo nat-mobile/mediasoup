@@ -19,6 +19,8 @@
 #include <unordered_set>
 #include <vector>
 
+namespace VP9{class VP9LayerSelector;}
+
 namespace RTC
 {
 	class Room : public RTC::Peer::Listener, public Timer::Listener
@@ -94,6 +96,7 @@ namespace RTC
 		std::unordered_map<const RTC::RtpSender*, const RTC::RtpReceiver*> mapRtpSenderRtpReceiver;
 		std::unordered_map<RTC::RtpReceiver*, std::vector<int8_t>> mapRtpReceiverAudioLevels;
 		bool audioLevelsEventEnabled{ false };
+        VP9::VP9LayerSelector *m_vp9Selector{ nullptr };
 	};
 
 	/* Inline static methods. */

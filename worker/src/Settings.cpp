@@ -65,6 +65,8 @@ void Settings::SetConfiguration(int argc, char* argv[])
 		{ "rtcAnnouncedIPv6",    optional_argument, nullptr, '7' },
 		{ "rtcMinPort",          optional_argument, nullptr, 'm' },
 		{ "rtcMaxPort",          optional_argument, nullptr, 'M' },
+        { "vp9MinSpartial",      optional_argument, nullptr, 's' },
+        { "vp9MinTemporial",     optional_argument, nullptr, 'T' },
 		{ "dtlsCertificateFile", optional_argument, nullptr, 'c' },
 		{ "dtlsPrivateKeyFile",  optional_argument, nullptr, 'p' },
 		{ nullptr, 0, nullptr, 0 }
@@ -120,6 +122,14 @@ void Settings::SetConfiguration(int argc, char* argv[])
 			case 'M':
 				Settings::configuration.rtcMaxPort = std::stoi(optarg);
 				break;
+                
+            case 's':
+                Settings::configuration.vp9MinSpartial = std::stoi(optarg);
+                break;
+                
+            case 'T':
+                Settings::configuration.vp9MinTemporial = std::stoi(optarg);
+                break;
 
 			case 'c':
 				stringValue                                 = std::string(optarg);
