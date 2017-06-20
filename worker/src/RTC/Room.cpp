@@ -1097,7 +1097,7 @@ namespace RTC
 		this->audioLevelsTimer = new Timer(this);
         
         // create selector if needed
-        if (Settings::configuration.vp9MinTemporial > 0 || Settings::configuration.vp9MinSpartial > 0)
+        if (Settings::configuration.vp9MinTemporial < 2 || Settings::configuration.vp9MinSpartial < 1)
         {
             m_vp9Selector = new VP9::VP9LayerSelector();
             m_vp9Selector->SelectTemporalLayer(Settings::configuration.vp9MinTemporial);
