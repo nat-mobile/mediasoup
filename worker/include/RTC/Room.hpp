@@ -94,9 +94,12 @@ namespace RTC
 		std::unordered_map<uint32_t, RTC::Peer*> peers;
 		std::unordered_map<const RTC::RtpReceiver*, std::unordered_set<RTC::RtpSender*>> mapRtpReceiverRtpSenders;
 		std::unordered_map<const RTC::RtpSender*, const RTC::RtpReceiver*> mapRtpSenderRtpReceiver;
-		std::unordered_map<RTC::RtpReceiver*, std::vector<int8_t>> mapRtpReceiverAudioLevels;
+        std::unordered_map<const RTC::RtpReceiver*, VP9::VP9LayerSelector*> mapRtpRtpReceiverLayerSelector;
+        std::unordered_map<RTC::RtpReceiver*, std::vector<int8_t>> mapRtpReceiverTmpAudioLevels;
+        std::unordered_map<std::string, int8_t> mapPeerAudioLevel;
+        bool needToFilterLayers{ false };
+        bool needToFilterAudioLevels{ true };
 		bool audioLevelsEventEnabled{ false };
-        VP9::VP9LayerSelector *m_vp9Selector{ nullptr };
 	};
 
 	/* Inline static methods. */

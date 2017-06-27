@@ -122,17 +122,14 @@ namespace RTC
         
         // create selector if needed
         if (Settings::configuration.vp9MinTemporial < 2 || Settings::configuration.vp9MinSpartial < 1)
-        {
-            m_vp9Selector = new VP9::VP9LayerSelector();
-            m_vp9Selector->SelectTemporalLayer(Settings::configuration.vp9MinTemporial);
-            m_vp9Selector->SelectSpatialLayer(Settings::configuration.vp9MinSpartial);
-        }
+            needToFilterLayers = true;
 	}
 
 	Room::~Room()
 	{
 		MS_TRACE();
-        delete m_vp9Selector;
+        for (auto ls : mapRtpRtpReceiverLayerSelector)
+            delete ls.second;
 	}
 
 	void Room::Destroy()
@@ -334,7 +331,7 @@ namespace RTC
 					return;
 
 				// Clear map of audio levels.
-				this->mapRtpReceiverAudioLevels.clear();
+				this->mapRtpReceiverTmpAudioLevels.clear();
 
 				// Start or stop audio levels periodic timer.
 				if (audioLevelsEventEnabled)
@@ -673,64 +670,94 @@ namespace RTC
 		this->mapRtpSenderRtpReceiver.erase(rtpSender);
 	}
 
-	void Room::OnPeerRtpPacket(
-	    const RTC::Peer* /*peer*/, RTC::RtpReceiver* rtpReceiver, RTC::RtpPacket* packet)
+	void Room::OnPeerRtpPacket(const RTC::Peer* peer, RTC::RtpReceiver* rtpReceiver, RTC::RtpPacket* packet)
 	{
 		MS_TRACE();
 
 		MS_ASSERT(
 		    this->mapRtpReceiverRtpSenders.find(rtpReceiver) != this->mapRtpReceiverRtpSenders.end(),
 		    "RtpReceiver not present in the map");
-
-		auto& rtpSenders = this->mapRtpReceiverRtpSenders[rtpReceiver];
         
-        // now we drop packets for all senders
-        if (m_vp9Selector && packet->GetPayloadType() == 101)
+        // Update audio levels.
+        if (this->audioLevelsEventEnabled)
         {
+            uint8_t volume;
+            bool voice;
+            
+            if (packet->ReadAudioLevel(&volume, &voice))
             {
-                // debug info as error
-                VP9::VP9PayloadDescription desc;
-                if (desc.Parse(packet->GetPayload(), 1700))
-                    std::cerr << " temporal " << (int)desc.temporalLayerId << " spatial " << (int)desc.spatialLayerId << std::endl;
-            }
-            // drop packets if needed
-            uint32_t extSegNum;
-            bool mark;
-            if(m_vp9Selector->Select(packet, extSegNum, mark))
-            {
-                packet->SetSequenceNumber(extSegNum);
-                uint16_t cicles = extSegNum >> 16;
-                packet->SetExtendedSequenceNumber(((uint32_t)cicles) << 16 | packet->GetSequenceNumber());
-                packet->SetMarker(mark);
-                // Send the RtpPacket to all the RtpSenders associated to the RtpReceiver from which it was received.
-                for (auto& rtpSender : rtpSenders)
-                    rtpSender->SendRtpPacket(packet);
-            }
-            else
-            {
-                std::cerr << "packet was dropped" << std::endl;
+                int8_t dBov = volume * -1;
+                
+                this->mapRtpReceiverTmpAudioLevels[rtpReceiver].push_back(dBov);
             }
         }
-        else
+        
+        // filter packet
+        bool needToSendPacket = true;
+        if ((needToFilterAudioLevels || needToFilterLayers) && packet->GetPayloadType() == 101)
+        {
+            // filter by layers
+            if (needToFilterLayers)
+            {
+                {
+                    // debug info as error
+                    VP9::VP9PayloadDescription desc;
+                    if (desc.Parse(packet->GetPayload(), 1700))
+                        std::cerr << " temporal " << (int)desc.temporalLayerId << " spatial " << (int)desc.spatialLayerId << std::endl;
+                }
+                // create filter if it is not created yet
+                if (mapRtpRtpReceiverLayerSelector.find(rtpReceiver) == mapRtpRtpReceiverLayerSelector.end())
+                {
+                    mapRtpRtpReceiverLayerSelector[rtpReceiver] = new VP9::VP9LayerSelector();
+                    mapRtpRtpReceiverLayerSelector[rtpReceiver]->SelectTemporalLayer(Settings::configuration.vp9MinTemporial);
+                    mapRtpRtpReceiverLayerSelector[rtpReceiver]->SelectSpatialLayer(Settings::configuration.vp9MinSpartial);
+                }
+                // drop packets if needed
+                uint32_t extSegNum;
+                bool mark;
+                if(mapRtpRtpReceiverLayerSelector[rtpReceiver]->Select(packet, extSegNum, mark))
+                {
+                    packet->SetSequenceNumber(extSegNum);
+                    uint16_t cicles = extSegNum >> 16;
+                    packet->SetExtendedSequenceNumber(((uint32_t)cicles) << 16 | packet->GetSequenceNumber());
+                    packet->SetMarker(mark);
+                }
+                else
+                {
+                    std::cerr << "packet was dropped" << std::endl;
+                    needToSendPacket = false;
+                }
+            }
+            // filter by audio level
+            if (needToSendPacket && needToFilterAudioLevels && mapPeerAudioLevel.size() > 1)
+            {
+                std::cerr << "===========find active speaker ==================" << std::endl;
+                std::string activeSpeaker;
+                int8_t level = -127;
+                for (auto& lv : mapPeerAudioLevel)
+                {
+                    std::cerr << "speaker " << lv.first << " level " << (int)lv.second << std::endl;
+                    if (lv.second > level)
+                    {
+                        level = lv.second;
+                        activeSpeaker = lv.first;
+                    }
+                }
+                if (!activeSpeaker.empty() && activeSpeaker != peer->peerName)
+                {
+                    std::cerr << "packet was dropped for not active speaker " << peer->peerName << std::endl;
+                    needToSendPacket = false;
+                }
+            }
+        }
+        
+        // send packet if it was not filtered
+        if (needToSendPacket)
         {
             // Send the RtpPacket to all the RtpSenders associated to the RtpReceiver from which it was received.
-            for (auto& rtpSender : rtpSenders)
+            for (auto& rtpSender : this->mapRtpReceiverRtpSenders[rtpReceiver])
                 rtpSender->SendRtpPacket(packet);
         }
-
-		// Update audio levels.
-		if (this->audioLevelsEventEnabled)
-		{
-			uint8_t volume;
-			bool voice;
-
-			if (packet->ReadAudioLevel(&volume, &voice))
-			{
-				int8_t dBov = volume * -1;
-
-				this->mapRtpReceiverAudioLevels[rtpReceiver].push_back(dBov);
-			}
-		}
 	}
 
 	void Room::OnPeerRtcpReceiverReport(
@@ -809,9 +836,9 @@ namespace RTC
 		// Audio levels timer.
 		if (timer == this->audioLevelsTimer)
 		{
-			std::unordered_map<RTC::RtpReceiver*, int8_t> mapRtpReceiverAudioLevel;
-
-			for (auto& kv : this->mapRtpReceiverAudioLevels)
+            std::unordered_map<const RTC::RtpReceiver*, int8_t> mapRtpReceiverAudioLevel;
+            this->mapPeerAudioLevel.clear();
+			for (auto& kv : this->mapRtpReceiverTmpAudioLevels)
 			{
 				auto rtpReceiver = kv.first;
 				auto& dBovs = kv.second;
@@ -831,10 +858,24 @@ namespace RTC
 				}
 
 				mapRtpReceiverAudioLevel[rtpReceiver] = avgdBov;
+                for(auto p : peers)
+                {
+                    bool find = false;
+                    for ( auto r : p.second->GetRtpReceivers())
+                    {
+                        if (r == rtpReceiver)
+                        {
+                            find = true;
+                            mapPeerAudioLevel[p.second->peerName] = avgdBov;
+                            break;
+                        }
+                    }
+                    if (find) break;
+                }
 			}
 
 			// Clear map.
-			this->mapRtpReceiverAudioLevels.clear();
+			this->mapRtpReceiverTmpAudioLevels.clear();
 
 			// Emit event.
 			Json::Value eventData(Json::objectValue);
