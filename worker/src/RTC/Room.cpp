@@ -19,6 +19,8 @@ namespace RTC
 	/* Static. */
 
 	static constexpr uint64_t AudioLevelsInterval{ 1000 }; // In ms.
+    
+    static constexpr uint8_t ActiveSpeakerVoiceDiff{ 15 }; // In ms.
 
 	/* Class variables. */
 
@@ -662,6 +664,11 @@ namespace RTC
 			// Finally delete the RtpReceiver entry in the map.
 			this->mapRtpReceiverRtpSenders.erase(rtpReceiver);
 		}
+        
+        if (this->mapRtpReceiverAudioLevels.find(rtpReceiver) != this->mapRtpReceiverAudioLevels.end())
+        {
+            mapRtpReceiverAudioLevels.erase(this->mapRtpReceiverAudioLevels.find(rtpReceiver));
+        }
 	}
 
 	void Room::OnPeerRtpSenderClosed(const RTC::Peer* /*peer*/, RTC::RtpSender* rtpSender)
@@ -738,20 +745,9 @@ namespace RTC
                 }
             }
             // filter by audio level
-            if (needToSendPacket && needToFilterAudioLevels && mapRtpReceiverAudioLevels.size() > 1)
+            if (needToSendPacket && needToFilterAudioLevels && currentActiveSpeaker)
             {
-                const RTC::RtpReceiver *activeSpeaker = nullptr;
-                int8_t level = -127;
-                for (auto& lv : mapRtpReceiverAudioLevels)
-                {
-                    if (lv.second.normalizedValue > level)
-                    {
-                        level = lv.second.normalizedValue;
-                        activeSpeaker = lv.first;
-                    }
-                }
-                //if (activeSpeaker)
-                    //std::cerr << "active spaeker " << peerByReceiver(activeSpeaker) << std::endl;
+                std::cerr << "active spaeker " << peerByReceiver(currentActiveSpeaker) << std::endl;
             }
         }
         
@@ -836,8 +832,9 @@ namespace RTC
 		// Audio levels timer.
 		if (timer == this->audioLevelsTimer)
 		{
-            //std::cerr << "=========== on audio level timer ==================" << std::endl;
+            std::cerr << "=========== on audio level timer ==================" << std::endl;
             // calculate average value for each reciever
+            std::map<int, const RTC::RtpReceiver*> voiceSpeakers;
 			for (auto& lv : this->mapRtpReceiverAudioLevels)
 			{
                 // calculate min, max and current value
@@ -845,7 +842,7 @@ namespace RTC
 				int8_t avgdBov{ -127 };
                 lv.second.minValue = 127;
                 lv.second.maxValue = -127;
-                //std::cerr << peerByReceiver(lv.first);
+                std::cerr << peerByReceiver(lv.first);
 				if (!dBovs.empty())
 				{
                     int16_t sumdBovs{ 0 };
@@ -860,27 +857,41 @@ namespace RTC
                     }
 					avgdBov = static_cast<int8_t>(std::lround(sumdBovs / static_cast<int16_t>(dBovs.size())));
 				}
-                //std::cerr << std::endl;
 				lv.second.value = avgdBov;
                 // Clear map for future use
                 lv.second.currentTmpValues.clear();
-                const double normolizedValue = lv.second.maxValue - lv.second.minValue; //-127 + 254 * (lv.second.value - lv.second.minValue) / (lv.second.maxValue - lv.second.minValue);
-                lv.second.normalizedValue = (int8_t)normolizedValue;
-                //std::cerr << "diff " << (int)lv.second.normalizedValue << std::endl;
-			}
+                const double diff = lv.second.maxValue - lv.second.minValue; //-127 + 254 * (lv.second.value - lv.second.minValue) / (lv.second.maxValue - lv.second.minValue);
+                lv.second.normalizedValue = (int8_t)diff;
+                std::cerr << " value " << (int)lv.second.value << " diff " << (int)lv.second.normalizedValue << std::endl;
+                if (lv.second.normalizedValue > ActiveSpeakerVoiceDiff && lv.second.value > -50)
+                    voiceSpeakers[lv.second.normalizedValue] = lv.first;
+            }
 			// Emit event.
             static const Json::StaticString JsonStringClass{ "class" };
             static const Json::StaticString JsonStringEntries{ "entries" };
 			Json::Value eventData(Json::objectValue);
 			eventData[JsonStringClass] = "Room";
 			eventData[JsonStringEntries] = Json::arrayValue;
-            for (auto& lv : this->mapRtpReceiverAudioLevels)
+            if(voiceSpeakers.size() >= 1)
+            {
+                currentActiveSpeaker = voiceSpeakers.begin()->second;
+                Json::Value entry(Json::arrayValue);
+                entry.append(Json::UInt{ currentActiveSpeaker->rtpReceiverId});
+                entry.append(Json::Int{ this->mapRtpReceiverAudioLevels[currentActiveSpeaker].value });
+                eventData[JsonStringEntries].append(entry);
+            }
+            else
+            {
+                currentActiveSpeaker = nullptr;
+            }
+                
+            /*for (auto& lv : this->mapRtpReceiverAudioLevels)
             {
                 Json::Value entry(Json::arrayValue);
                 entry.append(Json::UInt{ lv.first->rtpReceiverId });
                 entry.append(Json::Int{ lv.second.normalizedValue });
                 eventData[JsonStringEntries].append(entry);
-            }
+            }*/
 			this->notifier->Emit(this->roomId, "audiolevels", eventData);
 		}
 	}

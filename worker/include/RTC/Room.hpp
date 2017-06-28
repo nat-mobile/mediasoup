@@ -106,6 +106,7 @@ namespace RTC
             int8_t normalizedValue;
         };
         std::unordered_map<const RTC::RtpReceiver*, AudioLevelInfo> mapRtpReceiverAudioLevels;
+        const RTC::RtpReceiver *currentActiveSpeaker{ nullptr };
         std::map<const RTC::RtpReceiver*, std::string> mapRtpReceiverPeer;
         bool needToFilterLayers{ false };
         bool needToFilterAudioLevels{ true };
