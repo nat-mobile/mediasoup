@@ -18,7 +18,7 @@ namespace RTC
 {
 	/* Static. */
 
-	static constexpr uint64_t AudioLevelsInterval{ 500 }; // In ms.
+	static constexpr uint64_t AudioLevelsInterval{ 1000 }; // In ms.
 
 	/* Class variables. */
 
@@ -128,7 +128,7 @@ namespace RTC
 	Room::~Room()
 	{
 		MS_TRACE();
-        for (auto ls : mapRtpRtpReceiverLayerSelector)
+        for (auto ls : mapRtpReceiverLayerSelector)
             delete ls.second;
 	}
 
@@ -331,7 +331,7 @@ namespace RTC
 					return;
 
 				// Clear map of audio levels.
-				this->mapRtpReceiverTmpAudioLevels.clear();
+				this->mapRtpReceiverAudioLevels.clear();
 
 				// Start or stop audio levels periodic timer.
 				if (audioLevelsEventEnabled)
@@ -523,6 +523,17 @@ namespace RTC
 		// Attach the RtpSender to the peer.
 		senderPeer->AddRtpSender(rtpSender, rtpParameters, associatedRtpReceiverId);
 	}
+    
+    std::string Room::peerByReceiver(const RTC::RtpReceiver* rtpReceiver) const
+    {
+        MS_TRACE();
+        
+        for(const auto &peer : peers)
+            for (const auto & r : peer.second->GetRtpReceivers())
+                if (r == rtpReceiver)
+                    return peer.second->peerName;
+        return std::string();
+    }
 
 	void Room::OnPeerClosed(const RTC::Peer* peer)
 	{
@@ -683,12 +694,10 @@ namespace RTC
         {
             uint8_t volume;
             bool voice;
-            
             if (packet->ReadAudioLevel(&volume, &voice))
             {
-                int8_t dBov = volume * -1;
-                
-                this->mapRtpReceiverTmpAudioLevels[rtpReceiver].push_back(dBov);
+                const int8_t dBov = volume * -1;
+                this->mapRtpReceiverAudioLevels[rtpReceiver].currentTmpValues.push_back(dBov);
             }
         }
         
@@ -706,16 +715,16 @@ namespace RTC
                         std::cerr << " temporal " << (int)desc.temporalLayerId << " spatial " << (int)desc.spatialLayerId << std::endl;
                 }
                 // create filter if it is not created yet
-                if (mapRtpRtpReceiverLayerSelector.find(rtpReceiver) == mapRtpRtpReceiverLayerSelector.end())
+                if (mapRtpReceiverLayerSelector.find(rtpReceiver) == mapRtpReceiverLayerSelector.end())
                 {
-                    mapRtpRtpReceiverLayerSelector[rtpReceiver] = new VP9::VP9LayerSelector();
-                    mapRtpRtpReceiverLayerSelector[rtpReceiver]->SelectTemporalLayer(Settings::configuration.vp9MinTemporial);
-                    mapRtpRtpReceiverLayerSelector[rtpReceiver]->SelectSpatialLayer(Settings::configuration.vp9MinSpartial);
+                    mapRtpReceiverLayerSelector[rtpReceiver] = new VP9::VP9LayerSelector();
+                    mapRtpReceiverLayerSelector[rtpReceiver]->SelectTemporalLayer(Settings::configuration.vp9MinTemporial);
+                    mapRtpReceiverLayerSelector[rtpReceiver]->SelectSpatialLayer(Settings::configuration.vp9MinSpartial);
                 }
                 // drop packets if needed
                 uint32_t extSegNum;
                 bool mark;
-                if(mapRtpRtpReceiverLayerSelector[rtpReceiver]->Select(packet, extSegNum, mark))
+                if(mapRtpReceiverLayerSelector[rtpReceiver]->Select(packet, extSegNum, mark))
                 {
                     packet->SetSequenceNumber(extSegNum);
                     uint16_t cicles = extSegNum >> 16;
@@ -724,30 +733,25 @@ namespace RTC
                 }
                 else
                 {
-                    std::cerr << "packet was dropped" << std::endl;
+                    std::cerr << "packet was dropped for " << peerByReceiver(rtpReceiver) << std::endl;
                     needToSendPacket = false;
                 }
             }
             // filter by audio level
-            if (needToSendPacket && needToFilterAudioLevels && mapPeerAudioLevel.size() > 1)
+            if (needToSendPacket && needToFilterAudioLevels && mapRtpReceiverAudioLevels.size() > 1)
             {
-                std::cerr << "===========find active speaker ==================" << std::endl;
-                std::string activeSpeaker;
+                const RTC::RtpReceiver *activeSpeaker = nullptr;
                 int8_t level = -127;
-                for (auto& lv : mapPeerAudioLevel)
+                for (auto& lv : mapRtpReceiverAudioLevels)
                 {
-                    std::cerr << "speaker " << lv.first << " level " << (int)lv.second << std::endl;
-                    if (lv.second > level)
+                    if (lv.second.normalizedValue > level)
                     {
-                        level = lv.second;
+                        level = lv.second.normalizedValue;
                         activeSpeaker = lv.first;
                     }
                 }
-                if (!activeSpeaker.empty() && activeSpeaker != peer->peerName)
-                {
-                    std::cerr << "packet was dropped for not active speaker " << peer->peerName << std::endl;
-                    needToSendPacket = false;
-                }
+                //if (activeSpeaker)
+                    //std::cerr << "active spaeker " << peerByReceiver(activeSpeaker) << std::endl;
             }
         }
         
@@ -829,72 +833,54 @@ namespace RTC
 	inline void Room::OnTimer(Timer* timer)
 	{
 		MS_TRACE();
-
-		static const Json::StaticString JsonStringClass{ "class" };
-		static const Json::StaticString JsonStringEntries{ "entries" };
-
 		// Audio levels timer.
 		if (timer == this->audioLevelsTimer)
 		{
-            std::unordered_map<const RTC::RtpReceiver*, int8_t> mapRtpReceiverAudioLevel;
-            this->mapPeerAudioLevel.clear();
-			for (auto& kv : this->mapRtpReceiverTmpAudioLevels)
+            //std::cerr << "=========== on audio level timer ==================" << std::endl;
+            // calculate average value for each reciever
+			for (auto& lv : this->mapRtpReceiverAudioLevels)
 			{
-				auto rtpReceiver = kv.first;
-				auto& dBovs = kv.second;
+                // calculate min, max and current value
+				auto& dBovs = lv.second.currentTmpValues;
 				int8_t avgdBov{ -127 };
-
+                lv.second.minValue = 127;
+                lv.second.maxValue = -127;
+                //std::cerr << peerByReceiver(lv.first);
 				if (!dBovs.empty())
 				{
-					int16_t sumdBovs{ 0 };
-
+                    int16_t sumdBovs{ 0 };
 					for (auto& dBov : dBovs)
-					{
-						sumdBovs += dBov;
-					}
-
-					avgdBov = static_cast<int8_t>(
-						std::lround(sumdBovs / static_cast<int16_t>(dBovs.size())));
-				}
-
-				mapRtpReceiverAudioLevel[rtpReceiver] = avgdBov;
-                for(auto p : peers)
-                {
-                    bool find = false;
-                    for ( auto r : p.second->GetRtpReceivers())
                     {
-                        if (r == rtpReceiver)
-                        {
-                            find = true;
-                            mapPeerAudioLevel[p.second->peerName] = avgdBov;
-                            break;
-                        }
+						sumdBovs += dBov;
+                        if (dBov < lv.second.minValue)
+                            lv.second.minValue = dBov;
+                        if (dBov > lv.second.maxValue)
+                            lv.second.maxValue = dBov;
+                        //std::cerr << " " << (int)dBov;
                     }
-                    if (find) break;
-                }
+					avgdBov = static_cast<int8_t>(std::lround(sumdBovs / static_cast<int16_t>(dBovs.size())));
+				}
+                //std::cerr << std::endl;
+				lv.second.value = avgdBov;
+                // Clear map for future use
+                lv.second.currentTmpValues.clear();
+                const double normolizedValue = lv.second.maxValue - lv.second.minValue; //-127 + 254 * (lv.second.value - lv.second.minValue) / (lv.second.maxValue - lv.second.minValue);
+                lv.second.normalizedValue = (int8_t)normolizedValue;
+                //std::cerr << "diff " << (int)lv.second.normalizedValue << std::endl;
 			}
-
-			// Clear map.
-			this->mapRtpReceiverTmpAudioLevels.clear();
-
 			// Emit event.
+            static const Json::StaticString JsonStringClass{ "class" };
+            static const Json::StaticString JsonStringEntries{ "entries" };
 			Json::Value eventData(Json::objectValue);
-
 			eventData[JsonStringClass] = "Room";
 			eventData[JsonStringEntries] = Json::arrayValue;
-
-			for (auto& kv : mapRtpReceiverAudioLevel)
-			{
-				auto& rtpReceiverId = kv.first->rtpReceiverId;
-				auto& audioLevel = kv.second;
-				Json::Value entry(Json::arrayValue);
-
-				entry.append(Json::UInt{ rtpReceiverId });
-				entry.append(Json::Int{ audioLevel });
-
-				eventData[JsonStringEntries].append(entry);
-			}
-
+            for (auto& lv : this->mapRtpReceiverAudioLevels)
+            {
+                Json::Value entry(Json::arrayValue);
+                entry.append(Json::UInt{ lv.first->rtpReceiverId });
+                entry.append(Json::Int{ lv.second.normalizedValue });
+                eventData[JsonStringEntries].append(entry);
+            }
 			this->notifier->Emit(this->roomId, "audiolevels", eventData);
 		}
 	}

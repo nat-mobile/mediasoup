@@ -17,6 +17,7 @@
 #include <json/json.h>
 #include <unordered_map>
 #include <unordered_set>
+#include <map>
 #include <vector>
 
 namespace VP9{class VP9LayerSelector;}
@@ -55,6 +56,7 @@ namespace RTC
 		RTC::Peer* GetPeerFromRequest(Channel::Request* request, uint32_t* peerId = nullptr) const;
 		void SetCapabilities(std::vector<RTC::RtpCodecParameters>& mediaCodecs);
 		void AddRtpSenderForRtpReceiver(RTC::Peer* senderPeer, const RTC::RtpReceiver* rtpReceiver);
+        std::string peerByReceiver(const RTC::RtpReceiver* rtpReceiver) const;
 
 		/* Pure virtual methods inherited from RTC::Peer::Listener. */
 	public:
@@ -94,9 +96,17 @@ namespace RTC
 		std::unordered_map<uint32_t, RTC::Peer*> peers;
 		std::unordered_map<const RTC::RtpReceiver*, std::unordered_set<RTC::RtpSender*>> mapRtpReceiverRtpSenders;
 		std::unordered_map<const RTC::RtpSender*, const RTC::RtpReceiver*> mapRtpSenderRtpReceiver;
-        std::unordered_map<const RTC::RtpReceiver*, VP9::VP9LayerSelector*> mapRtpRtpReceiverLayerSelector;
-        std::unordered_map<RTC::RtpReceiver*, std::vector<int8_t>> mapRtpReceiverTmpAudioLevels;
-        std::unordered_map<std::string, int8_t> mapPeerAudioLevel;
+        std::unordered_map<const RTC::RtpReceiver*, VP9::VP9LayerSelector*> mapRtpReceiverLayerSelector;
+        struct AudioLevelInfo
+        {
+            std::vector<int8_t> currentTmpValues;
+            int8_t minValue { 127 };
+            int8_t maxValue { -127 };
+            int8_t value;
+            int8_t normalizedValue;
+        };
+        std::unordered_map<const RTC::RtpReceiver*, AudioLevelInfo> mapRtpReceiverAudioLevels;
+        std::map<const RTC::RtpReceiver*, std::string> mapRtpReceiverPeer;
         bool needToFilterLayers{ false };
         bool needToFilterAudioLevels{ true };
 		bool audioLevelsEventEnabled{ false };
