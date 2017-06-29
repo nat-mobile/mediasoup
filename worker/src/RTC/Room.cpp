@@ -755,9 +755,8 @@ namespace RTC
                     bool packetFromActiveSpeaker = false;
                     // we have one or more active speakers
                     for (auto& speaker : voiceSpeakers)
-                        if(speaker.second == rtpReceiver)
+                        if(peerByReceiver(speaker.second) == peerByReceiver(rtpReceiver))
                         {
-                            std::cerr << "active speaker" << peerByReceiver(speaker.second) << std::endl;
                             packetFromActiveSpeaker = true;
                             break;
                         }
