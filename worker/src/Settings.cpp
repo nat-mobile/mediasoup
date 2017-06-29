@@ -11,6 +11,7 @@
 #include <iterator> // std::ostream_iterator
 #include <sstream>  // std::ostringstream
 #include <unistd.h> // close()
+#include_next <iostream>
 extern "C" {
 #include <getopt.h>
 }
@@ -67,6 +68,7 @@ void Settings::SetConfiguration(int argc, char* argv[])
 		{ "rtcMaxPort",          optional_argument, nullptr, 'M' },
         { "vp9MinSpartial",      optional_argument, nullptr, 's' },
         { "vp9MinTemporial",     optional_argument, nullptr, 'T' },
+        { "needToFilterAudioLevels",     optional_argument, nullptr, 'a' },
 		{ "dtlsCertificateFile", optional_argument, nullptr, 'c' },
 		{ "dtlsPrivateKeyFile",  optional_argument, nullptr, 'p' },
 		{ nullptr, 0, nullptr, 0 }
@@ -129,6 +131,11 @@ void Settings::SetConfiguration(int argc, char* argv[])
                 
             case 'T':
                 Settings::configuration.vp9MinTemporial = std::stoi(optarg);
+                break;
+                
+            case 'a':
+                stringValue                                 = std::string(optarg);
+                Settings::configuration.needToFilterAudioLevels = (stringValue == "true" || stringValue == "TRUE") ? true : false;
                 break;
 
 			case 'c':

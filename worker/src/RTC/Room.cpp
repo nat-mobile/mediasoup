@@ -125,6 +125,9 @@ namespace RTC
         // create selector if needed
         if (Settings::configuration.vp9MinTemporial < 2 || Settings::configuration.vp9MinSpartial < 1)
             needToFilterLayers = true;
+        
+        // audio levels filtration
+        needToFilterAudioLevels = Settings::configuration.needToFilterAudioLevels;
 	}
 
 	Room::~Room()
@@ -740,14 +743,30 @@ namespace RTC
                 }
                 else
                 {
-                    std::cerr << "packet was dropped for " << peerByReceiver(rtpReceiver) << std::endl;
+                    std::cerr << "packet was dropped for " << peerByReceiver(rtpReceiver) << " because TS filtering"<< std::endl;
                     needToSendPacket = false;
                 }
             }
             // filter by audio level
-            if (needToSendPacket && needToFilterAudioLevels && currentActiveSpeaker)
+            if (needToSendPacket && needToFilterAudioLevels)
             {
-                std::cerr << "active spaeker " << peerByReceiver(currentActiveSpeaker) << std::endl;
+                if (voiceSpeakers.size() >= 1)
+                {
+                    bool packetFromActiveSpeaker = false;
+                    // we have one or more active speakers
+                    for (auto& speaker : voiceSpeakers)
+                        if(speaker.second == rtpReceiver)
+                        {
+                            std::cerr << "active speaker" << peerByReceiver(speaker.second) << std::endl;
+                            packetFromActiveSpeaker = true;
+                            break;
+                        }
+                    if (!packetFromActiveSpeaker)
+                    {
+                        std::cerr << "packet was dropped for " << peerByReceiver(rtpReceiver) << " because it is not active speaker" << std::endl;
+                        needToSendPacket = false;
+                    }
+                }
             }
         }
         
@@ -832,9 +851,9 @@ namespace RTC
 		// Audio levels timer.
 		if (timer == this->audioLevelsTimer)
 		{
-            std::cerr << "=========== on audio level timer ==================" << std::endl;
+            //std::cerr << "=========== on audio level timer ==================" << std::endl;
             // calculate average value for each reciever
-            std::map<int, const RTC::RtpReceiver*> voiceSpeakers;
+            voiceSpeakers.clear();
 			for (auto& lv : this->mapRtpReceiverAudioLevels)
 			{
                 // calculate min, max and current value
@@ -842,7 +861,7 @@ namespace RTC
 				int8_t avgdBov{ -127 };
                 lv.second.minValue = 127;
                 lv.second.maxValue = -127;
-                std::cerr << peerByReceiver(lv.first);
+                //std::cerr << peerByReceiver(lv.first);
 				if (!dBovs.empty())
 				{
                     int16_t sumdBovs{ 0 };
@@ -862,7 +881,7 @@ namespace RTC
                 lv.second.currentTmpValues.clear();
                 const double diff = lv.second.maxValue - lv.second.minValue; //-127 + 254 * (lv.second.value - lv.second.minValue) / (lv.second.maxValue - lv.second.minValue);
                 lv.second.normalizedValue = (int8_t)diff;
-                std::cerr << " value " << (int)lv.second.value << " diff " << (int)lv.second.normalizedValue << std::endl;
+                //std::cerr << " value " << (int)lv.second.value << " diff " << (int)lv.second.normalizedValue << std::endl;
                 if (lv.second.normalizedValue > ActiveSpeakerVoiceDiff && lv.second.value > -50)
                     voiceSpeakers[lv.second.normalizedValue] = lv.first;
             }
@@ -874,17 +893,11 @@ namespace RTC
 			eventData[JsonStringEntries] = Json::arrayValue;
             if(voiceSpeakers.size() >= 1)
             {
-                currentActiveSpeaker = voiceSpeakers.begin()->second;
                 Json::Value entry(Json::arrayValue);
-                entry.append(Json::UInt{ currentActiveSpeaker->rtpReceiverId});
-                entry.append(Json::Int{ this->mapRtpReceiverAudioLevels[currentActiveSpeaker].value });
+                entry.append(Json::UInt{ voiceSpeakers.begin()->second->rtpReceiverId});
+                entry.append(Json::Int{ this->mapRtpReceiverAudioLevels[voiceSpeakers.begin()->second].value });
                 eventData[JsonStringEntries].append(entry);
             }
-            else
-            {
-                currentActiveSpeaker = nullptr;
-            }
-                
             /*for (auto& lv : this->mapRtpReceiverAudioLevels)
             {
                 Json::Value entry(Json::arrayValue);
