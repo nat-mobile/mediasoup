@@ -1,4 +1,5 @@
 #include "VP9Filter.hpp"
+#include "Timer.hpp"
 
 namespace VP9
 {
@@ -687,5 +688,89 @@ namespace VP9
         return true;
         
     }
+
+    const uint64_t dropTimerInterval = 6000;
+    const uint64_t keepTimerInterval = 2000;
+    
+    
+    VP9AudioLevelSelector::VP9AudioLevelSelector():dropped(0),lastFilteredPacketNumber(0)
+    {
+        this->dropTimer = new Timer(this);
+        this->keepTimer = new Timer(this);
+    };
+    
+    VP9AudioLevelSelector::~VP9AudioLevelSelector()
+    {
+        this->dropTimer->Destroy();
+        this->keepTimer->Destroy();
+    }
+    
+    bool VP9AudioLevelSelector::Select(RTC::RtpPacket *packet, bool forceSelect, uint32_t &extSeqNum,bool &mark)
+    {
+        bool selected = true;
+        if (forceSelect)
+        {
+            // no need to filter packets - stop timers and update packet number
+            dropTimer->Stop();
+            keepTimer->Stop();
+        }
+        else
+        {
+            // filter packet
+            VP9PayloadDescription desc;
+            //Parse VP9 payload description
+            if (!desc.Parse(packet->GetPayload(), 1700))
+                //Error
+                return 0;
+            // check if we need to filter current packet
+            if(lastFilteredPacketNumber + 1 == packet->GetExtendedSequenceNumber())
+            {
+                // we checked prev packet and also need to check this one
+                if (dropTimer->IsActive())
+                {
+                    // drop packet
+                    dropped++;
+                    selected = false;
+                }
+                // increase counters
+                lastFilteredPacketNumber = packet->GetExtendedSequenceNumber();
+            }
+            else
+            {
+                dropTimer->Stop();
+                keepTimer->Stop();
+                //we dont chek prev packet wait end of frame
+                if (desc.endOfLayerFrame)
+                {
+                    lastFilteredPacketNumber = packet->GetExtendedSequenceNumber();
+                    dropTimer->Start(dropTimerInterval);
+                }
+            }
+        }
+        // update counters
+        if(selected)
+        {
+            //Calculate new packet number removing the dropped pacekts by the selection layer
+            extSeqNum = packet->GetExtendedSequenceNumber() - dropped;
+            //RTP mark is set for the last frame layer of the selected layer
+            mark = packet->HasMarker();
+        }
+        return selected;
+    }
+    
+    inline void VP9AudioLevelSelector::OnTimer(Timer* timer)
+    {
+        if (timer == dropTimer)
+        {
+            dropTimer->Stop();
+            keepTimer->Start(keepTimerInterval);
+        }
+        else if (timer == keepTimer)
+        {
+            keepTimer->Stop();
+            dropTimer->Start(dropTimerInterval);
+        }
+    }
+    
     
 }

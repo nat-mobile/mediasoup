@@ -20,7 +20,7 @@
 #include <map>
 #include <vector>
 
-namespace VP9{class VP9LayerSelector;}
+namespace VP9{class VP9LayerSelector; class VP9AudioLevelSelector;}
 
 namespace RTC
 {
@@ -97,6 +97,7 @@ namespace RTC
 		std::unordered_map<const RTC::RtpReceiver*, std::unordered_set<RTC::RtpSender*>> mapRtpReceiverRtpSenders;
 		std::unordered_map<const RTC::RtpSender*, const RTC::RtpReceiver*> mapRtpSenderRtpReceiver;
         std::unordered_map<const RTC::RtpReceiver*, VP9::VP9LayerSelector*> mapRtpReceiverLayerSelector;
+        std::unordered_map<const RTC::RtpReceiver*, VP9::VP9AudioLevelSelector*> mapRtpReceiverAudioLevelSelector;
         struct AudioLevelInfo
         {
             std::vector<int8_t> currentTmpValues;

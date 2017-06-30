@@ -337,6 +337,7 @@ namespace RTC
 
 				// Clear map of audio levels.
 				this->mapRtpReceiverAudioLevels.clear();
+                this->mapRtpReceiverAudioLevelSelector.clear();
 
 				// Start or stop audio levels periodic timer.
 				if (audioLevelsEventEnabled)
@@ -668,10 +669,34 @@ namespace RTC
 			this->mapRtpReceiverRtpSenders.erase(rtpReceiver);
 		}
         
-        if (this->mapRtpReceiverAudioLevels.find(rtpReceiver) != this->mapRtpReceiverAudioLevels.end())
+        // clear data
+        if (this->mapRtpReceiverLayerSelector.find(rtpReceiver) != this->mapRtpReceiverLayerSelector.end())
         {
-            mapRtpReceiverAudioLevels.erase(this->mapRtpReceiverAudioLevels.find(rtpReceiver));
+            delete this->mapRtpReceiverLayerSelector.find(rtpReceiver)->second;
+            mapRtpReceiverLayerSelector.erase(this->mapRtpReceiverLayerSelector.find(rtpReceiver));
         }
+        
+        if (this->mapRtpReceiverAudioLevels.find(rtpReceiver) != this->mapRtpReceiverAudioLevels.end())
+            mapRtpReceiverAudioLevels.erase(this->mapRtpReceiverAudioLevels.find(rtpReceiver));
+        
+        if (this->mapRtpReceiverAudioLevelSelector.find(rtpReceiver) != this->mapRtpReceiverAudioLevelSelector.end())
+        {
+            delete this->mapRtpReceiverAudioLevelSelector.find(rtpReceiver)->second;
+            mapRtpReceiverAudioLevelSelector.erase(this->mapRtpReceiverAudioLevelSelector.find(rtpReceiver));
+        }
+        
+        if (this->mapRtpReceiverPeer.find(rtpReceiver) != this->mapRtpReceiverPeer.end())
+            mapRtpReceiverPeer.erase(this->mapRtpReceiverPeer.find(rtpReceiver));
+        
+        for (std::map<int, const RTC::RtpReceiver*>::const_iterator it = voiceSpeakers.begin(); it != voiceSpeakers.end(); ++it)
+            if(it->second == rtpReceiver)
+            {
+                voiceSpeakers.erase(it);
+                break;
+            }
+
+        
+        
 	}
 
 	void Room::OnPeerRtpSenderClosed(const RTC::Peer* /*peer*/, RTC::RtpSender* rtpSender)
@@ -711,7 +736,7 @@ namespace RTC
             }
         }
         
-        // filter packet
+        // filter packet. Be careful here - filters may not work in the same time.
         bool needToSendPacket = true;
         if ((needToFilterAudioLevels || needToFilterLayers) && packet->GetPayloadType() == 101)
         {
@@ -750,21 +775,31 @@ namespace RTC
             // filter by audio level
             if (needToSendPacket && needToFilterAudioLevels)
             {
-                if (voiceSpeakers.size() >= 1)
-                {
-                    bool packetFromActiveSpeaker = false;
-                    // we have one or more active speakers
-                    for (auto& speaker : voiceSpeakers)
-                        if(peerByReceiver(speaker.second) == peerByReceiver(rtpReceiver))
-                        {
-                            packetFromActiveSpeaker = true;
-                            break;
-                        }
-                    if (!packetFromActiveSpeaker)
+                bool packetFromActiveSpeaker = voiceSpeakers.size() >= 1 ? false : true;
+                for (auto& speaker : voiceSpeakers)
+                    if(peerByReceiver(speaker.second) == peerByReceiver(rtpReceiver))
                     {
-                        std::cerr << "packet was dropped for " << peerByReceiver(rtpReceiver) << " because it is not active speaker" << std::endl;
-                        needToSendPacket = false;
+                        packetFromActiveSpeaker = true;
+                        break;
                     }
+                // create filter if it is not created yet
+                if (mapRtpReceiverAudioLevelSelector.find(rtpReceiver) == mapRtpReceiverAudioLevelSelector.end())
+                    mapRtpReceiverAudioLevelSelector[rtpReceiver] = new VP9::VP9AudioLevelSelector();
+                // drop packets if needed
+                uint32_t extSegNum;
+                bool mark;
+                if(mapRtpReceiverAudioLevelSelector[rtpReceiver]->Select(packet, packetFromActiveSpeaker, extSegNum, mark))
+                {
+                    packet->SetSequenceNumber(extSegNum);
+                    uint16_t cicles = extSegNum >> 16;
+                    packet->SetExtendedSequenceNumber(((uint32_t)cicles) << 16 | packet->GetSequenceNumber());
+                    packet->SetMarker(mark);
+                    std::cerr << "packet was keept for " << peerByReceiver(rtpReceiver) << " number " << packet->GetSequenceNumber() << std::endl;
+                }
+                else
+                {
+                    std::cerr << "packet was dropped for " << peerByReceiver(rtpReceiver) << " because it is not active speaker" << std::endl;
+                    needToSendPacket = false;
                 }
             }
         }

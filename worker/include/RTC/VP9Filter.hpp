@@ -2,6 +2,7 @@
 #define MS_RTC_VP9_FILTER_HPP
 
 #include "RTC/RtpPacket.hpp"
+#include "handles/Timer.hpp"
 #include <vector>
 
 
@@ -291,6 +292,22 @@ namespace VP9
         uint8_t nextSpatialLayerId;
         uint32_t dropped;
     };
+    
+    class VP9AudioLevelSelector : public Timer::Listener
+    {
+    public:
+        VP9AudioLevelSelector();
+        ~VP9AudioLevelSelector();
+        bool Select(RTC::RtpPacket *packet, bool forceSelect, uint32_t &extSeqNum,bool &mark);
+        inline void OnTimer(Timer* timer) override;
+        
+    private:
+        Timer* dropTimer{ nullptr };
+        Timer* keepTimer{ nullptr };
+        uint32_t dropped;
+        uint32_t lastFilteredPacketNumber;
+    };
+
 }
 
 #endif
