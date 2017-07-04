@@ -6,11 +6,11 @@
   "contributors": [
     "José Luis Millán <jmillan@aliax.net> (https://github.com/jmillan)"
   ],
-  "homepage": "https://mediasoup.org",
+  "homepage": "",
   "license": "ISC",
   "repository": {
     "type": "git",
-    "url": "https://github.com/versatica/mediasoup.git"
+    "url": "https://github.com/nat-mobile/mediasoup.git"
   },
   "keywords": [
     "webrtc",
