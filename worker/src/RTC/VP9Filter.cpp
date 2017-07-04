@@ -1,5 +1,5 @@
-#include "VP9Filter.hpp"
-#include "Timer.hpp"
+#include "RTC/VP9Filter.hpp"
+#include "handles/Timer.hpp"
 
 namespace VP9
 {

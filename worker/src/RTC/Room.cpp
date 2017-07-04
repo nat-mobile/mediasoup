@@ -6,7 +6,7 @@
 #include "Settings.hpp"
 #include "MediaSoupError.hpp"
 #include "Utils.hpp"
-#include "VP9Filter.hpp"
+#include "RTC/VP9Filter.hpp"
 #include <cmath> // std::lround()
 #include <set>
 #include <string>
